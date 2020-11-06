@@ -1,0 +1,16 @@
+spring:
+  rabbitmq:
+    #add the rabbitmq headless service name as host
+    host: rabbitmq-0.rabbitmq.default.svc.cluster.local
+    #add the username and password from secret. For example: ${<environment variable name>}
+    username: guest
+    password: guest
+    port: 5672
+
+server.port: 7777
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"

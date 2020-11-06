@@ -1,0 +1,99 @@
+#Define service of type LoadBalancer to expose the management HTTP port on each node and name it as rabbitmq-management
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-management
+  labels:
+    app: rabbitmq
+spec:
+  ports:
+    - port: 15672
+      name: http
+  selector:
+    app: rabbitmq
+  type: LoadBalancer # Or LoadBalancer in production
+---
+#Define the required headless service for StatefulSets and name it as rabbitmq
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+spec:
+  ports:
+    - port: 5672
+      name: amqp
+    - port: 4369
+      name: epmd
+    - port: 25672
+      name: rabbitmq-dist
+  # clusterIP: None
+  selector:
+    app: rabbitmq
+---
+#Define RabbitMQ StatefulSet using `rabbitmq:3.7.5-management` image configuring service and replicas.
+#It should contain postStart lifecycle hook that does two things:
+#1. Adds a new search domain to /etc/resolv.conf so that the StatefulSet short ordinal hostnames (e.g. rabbitmq-1) resolve to the other pods.
+#2. Stops the local RabbitMQ node, joins the cluster, and starts it back up (if it doesn’t already appear to be a member).
+#Get environment variable RABBITMQ_ERLANG_COOKIE value from secret key `erlang-cookie`.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq
+  serviceName: "rabbitmq"
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.7.5-management
+          #          lifecycle:
+          #            postStart:
+          #              exec:
+          #                command:
+          #                  - /bin/sh
+          #                  - -c
+          #                  - >
+          #                    if [ -z "$(grep rabbitmq /etc/resolv.conf)" ]; then
+          #                      sed "s/^search \([^ ]\+\)/search rabbitmq.\1 \1/" /etc/resolv.conf > /etc/resolv.conf.new;
+          #                      cat /etc/resolv.conf.new > /etc/resolv.conf;
+          #                      rm /etc/resolv.conf.new;
+          #                    fi;
+          #                    until rabbitmqctl node_health_check; do sleep 1; done;
+          #                    if [[ "$HOSTNAME" != "rabbitmq-0" && -z "$(rabbitmqctl cluster_status | grep rabbitmq-0)" ]]; then
+          #                      rabbitmqctl stop_app;
+          #                      rabbitmqctl join_cluster rabbit@rabbitmq-0;
+          #                      rabbitmqctl start_app;
+          #                    fi;
+          #                    rabbitmqctl set_policy ha-all "." '{"ha-mode":"exactly","ha-params":3,"ha-sync-mode":"automatic"}'
+          #          env:
+          #            - name: RABBITMQ_ERLANG_COOKIE
+          #              valueFrom:
+          #                secretKeyRef:
+          #                  name: rabbitmqsecret
+          #                  key: erlang-cookie
+          ports:
+            - containerPort: 5672
+              name: amqp
+          volumeMounts:
+            - name: rabbitmq
+              mountPath: /var/lib/rabbitmq/mnesia/rabbit@app-rabbitmq:cached
+  volumeClaimTemplates:
+    - metadata:
+        name: rabbitmq
+        annotations:
+          volume.alpha.kubernetes.io/storage-class: anything
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi # make this bigger in production
